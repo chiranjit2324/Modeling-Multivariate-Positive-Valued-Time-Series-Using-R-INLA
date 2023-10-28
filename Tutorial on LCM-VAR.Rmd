@@ -1,0 +1,445 @@
+---
+title: Tutorial on Level Correlated Models with vector autoregressive of order 1 (VAR(1)) evolution
+  of latent states
+author: "Chiranjit Dutta"
+date: "`r Sys.Date()`"
+output: html_document
+bibliography: LCMVAR.bib  
+nocite: '@*'
+---
+
+In this document we demonstrate how to setup level correlated model with VAR evolution of latent states. The following set of codes can be used to reproduce our results in Table 2.
+
+# Simulate data from LCM-VAR
+
+We simulate a trivariate time series $Y_{j,it}$ ($~j=1,\dots,3,~i=1,\dots,30,~ t=1,\dots,500$) from an LCM-VAR model:
+\begin{equation}\label{Eq: LCM-AR_sim}
+\begin{aligned}
+    &Y_{j,it} | \theta_{j,it}, \tau \sim \text{Gamma}\bigg(\tau, \frac{\tau}{\theta_{j,it}}\bigg),\\
+    &\log(\theta_{j,it}) = x_{j,t} + \alpha_{j,it} + \beta S_{j,it}, \\
+      & \boldsymbol{x}_t = \boldsymbol{\Phi} \boldsymbol{x}_{t-1} + \boldsymbol{w}_t,
+\end{aligned}    
+\end{equation}
+where \begin{equation*}
+\boldsymbol{\Phi}=\begin{pmatrix}
+0.5 & 0.2 & 0.3 \\
+0.4 & 0.3 & 0.5 \\
+0.1 & 0 & 0.8 \\
+\end{pmatrix}
+\end{equation*}
+and $\boldsymbol{w}_t$ is simulated from $N_{3}(\boldsymbol{0},\boldsymbol{W})$, where $\boldsymbol{W}= \text{diag}(1/20,1/25,1/20)$, i.e., $W_{1} = 1/20$, $W_{2} = 1/25$ and $W_{3} = 1/20$. The static predictor is simulated from $N(0,1)$ and the coefficient $\beta = 0.4$. The level correlated term $\boldsymbol{\alpha}_{it}$ is simulated from $N_3(\boldsymbol{0},\boldsymbol{\Sigma})$, where $\boldsymbol{\Sigma}$ is defined as \begin{equation}\label{Eq: Sigma}
+\boldsymbol{\Sigma}=\begin{pmatrix}
+\sigma^2_1 & \rho_{12} \sigma_1 \sigma_2 & \rho_{13} \sigma_1 \sigma_3 \\
+\rho_{12} \sigma_1 \sigma_2 & \sigma^2_2 & \rho_{23} \sigma_2 \sigma_3\\
+\rho_{13} \sigma_1 \sigma_3 & \rho_{23} \sigma_2 \sigma_3 & \sigma^2_3\\
+\end{pmatrix},
+\end{equation}
+with $\sigma^2_{1} = 1/2$, $\sigma^2_{2}= 1/4$,$\sigma^2_{3} = 1/3$ and $\rho_{12} = 0.8$, $\rho_{13} = 0.7$ and $\rho_{23} = 0.6$. The responses are simulated from gamma distribution with $\tau=300$. 
+
+```{r}
+rm(list=ls())
+
+# Setting seed for reproducibility:
+set.seed(12345)
+
+###############
+# Library:
+###############
+library(INLA)
+library(MASS)
+
+#########################
+# Length of series:
+#########################
+n <- 30
+T <- 500
+d <- 3
+
+##################
+# Parameters:
+#################
+tau <- 300
+beta <- 0.4
+
+# Covariance matrix \Sigma :
+sigma11 <- 1/2
+sigma22 <- 1/4
+sigma33 <- 1/3
+rho_12 <- 0.8
+rho_13 <- 0.7
+rho_23 <- 0.6
+
+sigma12 <- rho_12*sqrt(sigma11)*sqrt(sigma22)
+sigma13 <- rho_13*sqrt(sigma11)*sqrt(sigma33)
+sigma23 <- rho_23*sqrt(sigma22)*sqrt(sigma33)
+
+level.sigma.true <- matrix(c(sigma11,sigma12,sigma13
+                             ,sigma12,sigma22,sigma23
+                             ,sigma13,sigma23,sigma33),nrow=d)
+
+phi_mat <- matrix(c(0.5,0.2,0.3,0.4,0.3,0.5,0.1,0,0.8),nrow=d,byrow=TRUE)   
+
+# Construct W matrix:
+rho.w1w2= 0
+rho.w1w3= 0
+rho.w2w3= 0
+
+sigma2.w1 <- 1/20   
+sigma2.w2 <- 1/25   
+sigma2.w3 <- 1/20   
+cov.w1w2 <- rho.w1w2*sqrt(sigma2.w1*sigma2.w2)
+cov.w1w3 <- rho.w1w3*sqrt(sigma2.w1*sigma2.w3)
+cov.w2w3 <- rho.w2w3*sqrt(sigma2.w2*sigma2.w3)
+
+sigma_mat_w <- matrix(NA,nrow = d,ncol = d)
+sigma_mat_w[lower.tri(sigma_mat_w)] <- sigma_mat_w[upper.tri(sigma_mat_w)] <- c(cov.w1w2,cov.w1w3,cov.w2w3)
+diag(sigma_mat_w) <- c(sigma2.w1,sigma2.w2,sigma2.w3)
+
+###########################
+# Simulation of VAR(1)
+###########################
+sim.VAR <- function(phi_mat,n){
+  #n <- T
+  init_val <- MASS::mvrnorm(n = 1,mu = rep(0,d)
+                            ,Sigma = sigma_mat_w)
+  sample_list <- list()
+  sample_list[[1]] <- init_val
+  for(i in 2:n){
+    sample_list[[i]] <- phi_mat %*% sample_list[[i-1]] + matrix(MASS::mvrnorm(n = 1,mu = rep(0,d)
+                                                                              ,Sigma = sigma_mat_w))
+  }
+  
+  simulated_var <- do.call(cbind,sample_list)
+  var_ts <- t(simulated_var)
+  colnames(var_ts) <- paste("y",1:d,sep="")
+  
+  return(var_ts)
+}
+
+fixed_sim_VAR <- sim.VAR(phi_mat,n=T)
+
+# Fixed VAR process:
+x_t_list <- list()
+for(i in 1:n){
+  x_t_list[[i]] <- data.frame(i.index=i,j.index=rep(1:d,each=T),t.index= rep(1:T,d)
+                                  ,gamma=as.vector(fixed_sim_VAR))
+}
+
+x_t <- do.call(rbind,x_t_list)
+
+# Generate /alpha_{it}
+alpha_it_list <- list()
+for(i in 1:n){
+  alpha_it_list[[i]] <- data.frame(i.index=i,j.index=rep(1:d,each=T),t.index= rep(1:T,d)
+                                   ,alpha=as.vector(mvrnorm(n = T,mu = rep(0,d)
+                                                            ,Sigma = level.sigma.true)))
+}
+
+alpha_it <- do.call(rbind,alpha_it_list)
+
+# Static Explanatory variable:
+S_jit_mat <- data.frame(i.index=rep(1:n,each=T*d),j.index=rep(rep(1:d,each=T),n)
+                        ,t.index=rep(1:T,n*d),S_jit = rnorm(d*n*T,sd=1))
+
+
+theta_jit <- data.frame(i.index=alpha_it$i.index,j.index= alpha_it$j.index
+                        ,t.index=alpha_it$t.index
+                        ,theta=exp(alpha_it$alpha + x_t$gamma + beta*S_jit_mat$S_jit))
+
+# Formatting responses:
+response_jit <- data.frame(i.index=theta_jit$i.index,j.index=theta_jit$j.index
+                           ,t.index=theta_jit$t.index,theta=theta_jit$theta,response=NA)
+
+for(k in 1:nrow(response_jit)){
+  response_jit$response[k] <- rgamma(n = 1,shape = tau,scale = response_jit$theta[k]/tau)
+}
+
+# Response:
+all_response <- response_jit
+
+new_comp1 <- response_jit[response_jit$j.index==1,]$response
+new_comp2 <- response_jit[response_jit$j.index==2,]$response
+new_comp3 <- response_jit[response_jit$j.index==3,]$response
+
+data_response <- data.frame(new_comp1,new_comp2,new_comp3)
+```
+
+We set up indexes and data frame. 
+
+```{r}
+################################################
+# Setting up indexes and  data frame for R-INLA:
+################################################
+N_1 <- d*T
+
+# Index for random effects (There are N replicated d-variate random effects)
+alpha_index <- rep(c(1:N_1),n)
+
+# Index for each component 
+ind_1 <- rep(c(1:T, rep(NA,T),rep(NA,T)),n)
+ind_2 <- rep(c(rep(NA,T), 1:T,rep(NA,T)),n)
+ind_3 <- rep(c(rep(NA,T), rep(NA,T),1:T),n)
+
+# Replicates:
+rep_alpha_index <- rep(1:n,each=N_1)
+rep_ind1 <-  rep(1:n, each=N_1)
+rep_ind2 <-  rep(1:n, each=N_1)
+rep_ind3 <-  rep(1:n, each=N_1)
+
+response_df_new <- data.frame(all_response,alpha_index
+                              ,rep_alpha_index,ind_1,ind_2,ind_3,
+                              rep_ind1,rep_ind2,rep_ind3)
+```
+
+# R-INLA setup with rgeneric:
+
+We define the function $\textit{inla.rgeneric.VAR.model.diagW}$ using $\textit{rgeneric}$ which is a mechanism implemented in the $\textit{INLA}$ package which allows users to implement latent effects in $\textit{R}$. To define the new latent effect one has to define the following $\textit{R}$ functions:
+
+- $\textit{mu()}$: The mean of the latent effects which in this case is a zero vector.
+- $\textit{Q()}$: The precision of the latent effects,
+- $\textit{initial()}$: The initial values of the parameter vector $\theta$ expressed in $\textit{R-INLA}$'s internal scale.
+- $\textit{graph()}$: A graph indicating the non-zero entries of the precision matrix $\textit{Q()}$
+- $\textit{log.norm.const()}$: It is log-normalizing constant which is the logarithm of the normalizing constant from a multivariate Gaussian distribution
+- $\textit{log.prior()}$: This specifies the logarithm of the priors for the original model parameters
+- $\textit{interpret.theta()}$: This enables us to obtain the list of original parameters and number of parameters.
+
+```{r}
+# Define previous variables as global to avoid warnings()
+utils::globalVariables(c("p", "k", "N"))
+
+
+'inla.rgeneric.VAR.model.diagW' <-
+  function(cmd = c("graph", "Q", "mu", "initial", "log.norm.const",
+                   "log.prior", "quit"), theta = NULL)
+  {
+    interpret.theta <- function(){
+      n_phi <- k*k*p 
+      n_prec <- k
+      n_tot <- n_phi + n_prec
+      phi_VAR <- sapply(theta[as.integer(1:n_phi)], function(x) { x })
+      # W matrix of precisions     
+      wprec <- sapply(theta[as.integer((n_phi+1):(n_phi+n_prec))], function(x) { exp(x) })
+      param <- c(phi_VAR, wprec)
+      # Initial k times k matrix with 1 on the diagonal - error cov W matrix
+      W <- diag(1, n_prec)
+      # Preparing the st. dev matrix
+      st.dev <- 1 / sqrt(wprec)
+      # Matrix of st. dev.
+      st.dev.mat <- matrix(st.dev, ncol = 1) %*% matrix(st.dev, nrow = 1)
+      # Final Variance-Covariance matrix: Diagonal if no correlation
+      W <- W * st.dev.mat # Element wise multiplication
+      # Inverting the matrix
+      PREC <- solve(W)
+      return(list(param = param, VACOV = W, PREC = PREC, phi_vec=c(phi_VAR)
+                  ,n_phi=n_phi,n_prec=n_prec))
+      
+    }
+    
+    # Precision matrix
+    Q <- function(theta){
+      # Parameters:
+      param <- interpret.theta()
+      # Define phi_matrix and sigma_w_inverse
+      phi_mat <- matrix(param$phi_vec,nrow=k)
+      sigma_w_inv <- param$PREC
+      # Define A,B and C matrices:
+      A <- t(phi_mat)%*%sigma_w_inv%*%phi_mat
+      B <- -t(phi_mat)%*%sigma_w_inv
+      C <- sigma_w_inv
+      # Construct Mid-block:
+      zero_mat <- matrix(0,nrow=k,ncol=k*N)
+      # Define the matrix block:
+      mat <- cbind(t(B),A+C,B)
+      # Initializing column id and matrix list:
+      col_id <- list()
+      mat_list <- list()
+      col_id[[1]] <- 1:(3*k)
+      mat_list[[1]] <- zero_mat
+      mat_list[[1]][,col_id[[1]]] <- mat
+      for(id in 2:(N-2)){
+        start_id <- col_id[[id-1]][1]+k
+        end_id <-  start_id+(3*k-1)
+        col_id[[id]] <- start_id:end_id
+        mat_list[[id]] <- zero_mat
+        mat_list[[id]][,col_id[[id]]] <- mat
+      }
+      mid_block <- do.call(rbind,mat_list)
+      tau_val <- 0.1
+      diffuse_prec <- tau_val*diag(1,k)
+      # Construct first and last row blocks and then join with mid block:
+      first_row_block <- matrix(0,nrow=k,ncol=k*N)
+      mat_first <- cbind(A+diffuse_prec,B)
+      first_row_block[1:k,1:(2*k)] <- mat_first
+      last_row_block <- matrix(0,nrow=k,ncol=k*N)
+      mat_last <- cbind(t(B),C)
+      last_row_block[1:k,(k*N - 2*k+1):(k*N)] <- mat_last
+      toep_block_mat <- rbind(first_row_block,mid_block,last_row_block)
+      # Changing to a sparse Matrix:
+      library(Matrix)
+      prec_mat <- Matrix(toep_block_mat,sparse = TRUE)
+      return(prec_mat)
+    }
+    
+    # Graph function: Essentially Q matrix
+    graph = function() {
+      return (inla.as.sparse(Q()))
+    }
+    
+    # Mean of model
+    mu <- function() {
+      return(numeric(0))
+    }
+    
+    # Log normal constant:
+    log.norm.const <- function() {
+      Q <- Q()
+      log_det_val <- Matrix::determinant(Q, logarithm = TRUE)$modulus
+      val <- (-k*N/2)*log(2*pi) + 0.5 * log_det_val
+      return (val)
+    }
+
+    log.prior <- function() {
+      # return the log-prior for the hyperparameters.
+      param <- interpret.theta()
+      pars <- param$param
+      k <- k
+      total_par <- param$n_phi + param$n_prec
+      # Normal prior for phi's:
+      theta_phi <- theta[1:param$n_phi]
+      phi_prior <- sum(sapply(theta_phi,function(x) dnorm(x,mean=0,sd=1,log=TRUE)))
+      theta_prec <- theta[(param$n_phi + 1):(param$n_phi+param$n_prec)]
+      prec_prior <- sum(sapply(theta_prec,function(x) dgamma(x,shape = 0.1,scale = 10,log=TRUE)))
+      prec_jacob <- sum(theta_prec) # This is for precision terms
+      prior_val <- phi_prior + prec_prior + prec_jacob
+      return (prior_val)
+    }
+    
+    initial = function() {
+      phi_init <- rep(0.1,k^2)
+      prec_init <- rep(1,k)
+      #rho_init <- rep(0.1, k*(k-1)/2)
+      #init <- c(phi_init,prec_init,rho_init)
+      init <- c(phi_init,prec_init)
+      return (init)
+    }
+    
+    # FIX for rgeneric to work on R >= 4
+    # Provided by E. T. Krainski
+    if (as.integer(R.version$major) > 3) {
+      if (!length(theta))
+        theta <- initial()
+    } else {
+      if (is.null(theta)) {
+        theta <- initial()
+      }
+    }
+    val <- do.call(match.arg(cmd), args = list())
+    return (val)
+  }
+
+
+# This function allows us to obtain the list of original parameters:
+interpret.theta <- function(theta){
+  n_phi <- k*k*p 
+  n_prec <- k
+  n_tot <- n_phi + n_prec
+  phi_VAR <- sapply(theta[as.integer(1:n_phi)], function(x) { x })
+  #W matrix  precisions     
+  wprec <- sapply(theta[as.integer((n_phi+1):(n_phi+n_prec))], function(x) { exp(x) })
+  param <- c(phi_VAR, wprec)
+  # initial k times k matrix with 1 on the diagonal - error cov W matrix
+  W <- diag(1, n_prec)
+  #Preparing the st. dev matrix
+  st.dev <- 1 / sqrt(wprec)
+  # Matrix of st. dev.
+  st.dev.mat <- matrix(st.dev, ncol = 1) %*% matrix(st.dev, nrow = 1)
+  # Final Variance-Covariance matrix: Diagonal if no correlation
+  W <- W * st.dev.mat # Element wise multiplication
+  # Inverting the matrix
+  PREC <- solve(W)
+  return(list(param = param, VACOV = W, PREC = PREC, phi_vec=c(phi_VAR)
+              ,n_phi=n_phi,n_prec=n_prec))
+  
+}
+```
+
+# Results:
+
+```{r}
+###############################
+# Setting up data for INLA :
+###############################
+
+subset_data <- response_df_new[response_df_new$i.index==1 & response_df_new$j.index==1,]
+p <<- 1
+k <<- d
+N <<- nrow(subset_data)
+
+##########################
+# Setting index for VAR:
+##########################
+comp1_id <- seq(1,3*N,by=d)
+comp2_id <- seq(2,3*N,by=d)
+comp3_id <- seq(3,3*N,by=d)
+var_id <- c(comp1_id,comp2_id,comp3_id)
+response_df_new$var_id <- rep(var_id,n)
+
+# Setting rgeneric model:
+model <- inla.rgeneric.define(inla.rgeneric.VAR.model.diagW,p = p, k = k,N=N)
+
+formula.inla= response ~ -1+f(alpha_index, model="iid3d", n=N_1
+                              ,replicate = rep_alpha_index)+ S_jit_mat$S_jit +f(var_id,model=model)
+
+result= inla(formula.inla,family="gamma",
+             data =response_df_new,
+             control.compute=list(dic=FALSE),
+             control.family = list(hyper = list(prec = list(prior="loggamma"
+                                                            ,param=c(300,1)))),
+             verbose = TRUE,control.inla=list(control.vb=list(enable=FALSE)))
+
+##################
+# Results:
+##################  
+all_parameters_hyper <- result$summary.hyperpar
+all_parameters_fixed <- result$summary.fixed
+
+actual <- c(beta,tau,1/sigma11,1/sigma22,1/sigma33
+            ,rho_12,rho_13,rho_23
+            ,as.vector(phi_mat),1/diag(sigma_mat_w))
+
+estimated_mean <- c(all_parameters_fixed$mean,
+                    all_parameters_hyper$mean[1:7],
+                    interpret.theta(all_parameters_hyper$mean[8:19])$param)
+
+ci_low <- c(all_parameters_fixed$`0.025quant`,
+            all_parameters_hyper$`0.025quant`[1:7],
+            interpret.theta(all_parameters_hyper$`0.025quant`[8:19])$param)
+
+ci_up <- c(all_parameters_fixed$`0.975quant`,
+           all_parameters_hyper$`0.975quant`[1:7],
+           interpret.theta(all_parameters_hyper$`0.975quant`[8:19])$param)
+
+# Standard deviation of transformed variable: Var(g(x)) = (g'(/mu_x))^2 * /sigma^2_X
+transformed_sd <- sqrt(exp(2*all_parameters_hyper$mean[17:19])*(all_parameters_hyper$sd[17:19])^2)
+estimated_std <- c(all_parameters_fixed$sd,
+                   all_parameters_hyper$sd[1:7],
+                   all_parameters_hyper$sd[8:16],
+                   transformed_sd)
+
+tab <- data.frame(actual,estimated_mean,estimated_std,ci_low,ci_up)
+rownames(tab) <- c("beta","tau","prec.v1","prec.v2","prec.v3"
+                   ,"rho.v1.v2","rho.v1.v3","rho.v2.v3"
+                   ,"phi_11","phi_21","phi_31"
+                   ,"phi_12","phi_22","phi_32"
+                   ,"phi_13","phi_23","phi_33"
+                   ,"prec.w1","prec.w2","prec.w3")
+
+colnames(tab) <- c("True value","Posterior Mean", "Posterior Std. Dev."
+                   ,"95% CI_low","95% CI_up")
+
+tab
+```
+
+# References
+
+
