@@ -11,7 +11,7 @@
 
 <meta name="author" content="Chiranjit Dutta" />
 
-<meta name="date" content="2023-10-20" />
+<meta name="date" content="2023-10-29" />
 
 <title>Tutorial on Level Correlated Models with vector autoregressive of order 1 (VAR(1)) evolution of latent states</title>
 
@@ -382,7 +382,7 @@ display: none;
 vector autoregressive of order 1 (VAR(1)) evolution of latent
 states</h1>
 <h4 class="author">Chiranjit Dutta</h4>
-<h4 class="date">2023-10-20</h4>
+<h4 class="date">2023-10-29</h4>
 
 </div>
 
@@ -524,7 +524,7 @@ fixed_sim_VAR &lt;- sim.VAR(phi_mat,n=T)
 x_t_list &lt;- list()
 for(i in 1:n){
   x_t_list[[i]] &lt;- data.frame(i.index=i,j.index=rep(1:d,each=T),t.index= rep(1:T,d)
-                                  ,gamma=as.vector(fixed_sim_VAR))
+                                  ,x=as.vector(fixed_sim_VAR))
 }
 
 x_t &lt;- do.call(rbind,x_t_list)
@@ -546,7 +546,7 @@ S_jit_mat &lt;- data.frame(i.index=rep(1:n,each=T*d),j.index=rep(rep(1:d,each=T)
 
 theta_jit &lt;- data.frame(i.index=alpha_it$i.index,j.index= alpha_it$j.index
                         ,t.index=alpha_it$t.index
-                        ,theta=exp(alpha_it$alpha + x_t$gamma + beta*S_jit_mat$S_jit))
+                        ,theta=exp(alpha_it$alpha + x_t$x + beta*S_jit_mat$S_jit))
 
 # Formatting responses:
 response_jit &lt;- data.frame(i.index=theta_jit$i.index,j.index=theta_jit$j.index

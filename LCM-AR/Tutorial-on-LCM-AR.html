@@ -11,7 +11,7 @@
 
 <meta name="author" content="Chiranjit Dutta" />
 
-<meta name="date" content="2023-10-20" />
+<meta name="date" content="2023-10-29" />
 
 <title>Tutorial on Level Correlated Models with univariate autoregressive (AR) evolution of latent states</title>
 
@@ -381,7 +381,7 @@ display: none;
 <h1 class="title toc-ignore">Tutorial on Level Correlated Models with
 univariate autoregressive (AR) evolution of latent states</h1>
 <h4 class="author">Chiranjit Dutta</h4>
-<h4 class="date">2023-10-20</h4>
+<h4 class="date">2023-10-29</h4>
 
 </div>
 
@@ -471,7 +471,7 @@ phi1 &lt;- 0.7
 phi2 &lt;- 0.7
 phi3 &lt;- 0.6
 
-# Covariance matrix for the evolution of gamma_j,t
+# Covariance matrix for the evolution of x_j,t
 sigma_w1_sq &lt;- 1/20
 sigma_w2_sq &lt;- 1/25
 sigma_w3_sq &lt;- 1/20
@@ -485,7 +485,7 @@ ar_sim &lt;- function(rho_AR,sigma_w_sq,T){
 }
 
 #########################
-# Simulate \gamma_{j,t}
+# Simulate x_{j,t}
 #########################
 rho_AR &lt;- c(phi1,phi2,phi3)
 sigma_w_sq &lt;- c(sigma_w1_sq,sigma_w2_sq,sigma_w3_sq)
@@ -498,12 +498,12 @@ x_jt_vec &lt;- matrix(unlist(x_jt))
 x_jt_df &lt;- data.frame(j.index= rep(1:d,each=T),t.index=rep(1:T,d),x_jt_vec)
 
 
-gamma_jit &lt;- list()
+x_jit &lt;- list()
 for(i in 1:N){
-  gamma_jit[[i]] &lt;- data.frame(i.index=i,x_jt_df)
+  x_jit[[i]] &lt;- data.frame(i.index=i,x_jt_df)
 }
 
-x_jt &lt;- do.call(rbind,gamma_jit)
+x_jt &lt;- do.call(rbind,x_jit)
 
 #alpha_it: (Matrix of dimension N*T ** d)
 alpha_it_list &lt;- list()

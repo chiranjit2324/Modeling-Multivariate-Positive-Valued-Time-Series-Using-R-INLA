@@ -1,35 +1,3 @@
----
-title: Tutorial on Level Correlated Models with univariate autoregressive (AR) evolution
-  of latent states
-author: "Chiranjit Dutta"
-date: "`r Sys.Date()`"
-output: html_document
-bibliography: LCMAR.bib  
-nocite: '@*'
----
-In this document we demonstrate how to setup level correlated model (LCM) with autoregressive (AR) evolution of latent states. The following set of codes can be used to reproduce our results in Table 1.
-
-## Simulate from LCM-AR
-We simulate a trivariate time series $Y_{j,it}$ ($~j=1,\dots,3,~i=1,\dots,30,~ t=1,\dots,500$) from an LCM-AR model:
-\begin{equation}\label{Eq: LCM-AR_sim}
-\begin{aligned}
-    &Y_{j,it} | \theta_{j,it}, \tau \sim \text{Gamma}\bigg(\tau, \frac{\tau}{\theta_{j,it}}\bigg),\\
-    &\log(\theta_{j,it}) = x_{j,t} + \alpha_{j,it} + \beta S_{j,it}, \\
-      & x_{j,t} = \phi_{j,1} x_{j,(t-1)} + w_{j,t},
-\end{aligned}    
-\end{equation}
-where a static predictor $S_{j,it}$ was simulated from $N(0,1)$ and the corresponding $\beta = 0.4$. The states evolve as AR(1) with $\phi_{11} = 0.7, \phi_{22} = 0.7, \phi_{33} = 0.6$, and the state errors $w_{1,t}, w_{2,t}$ and $w_{3,t}$ were simulated from $N(0,W_{1}), N(0,W_{2}) \text{ and } N(0,W_{3})$ respectively, with  $W_{1} = 1/20$, $W_{2} = 1/25$, and $W_{3} = 1/20$. The level correlation vector 
-$\boldsymbol{\alpha}_{it} =(\alpha_{1,it}, \alpha_{2,it}, \alpha_{3,it})'$ was simulated from a $N_3(\boldsymbol{0},\boldsymbol{\Sigma})$ distribution, where 
-\begin{equation}\label{Eq: Sigma}
-\boldsymbol{\Sigma}=\begin{pmatrix}
-\sigma^2_1 & \rho_{12} \sigma_1 \sigma_2 & \rho_{13} \sigma_1 \sigma_3 \\
-\rho_{12} \sigma_1 \sigma_2 & \sigma^2_2 & \rho_{23} \sigma_2 \sigma_3\\
-\rho_{13} \sigma_1 \sigma_3 & \rho_{23} \sigma_2 \sigma_3 & \sigma^2_3\\
-\end{pmatrix},
-\end{equation}
-with $\sigma^2_{1} = 1/2,  \sigma^2_{2}=1/4, \sigma^2_{3} = 1/3$ and $\rho_{12} = 0.8$, $\rho_{13} = 0.7$ and $\rho_{23} = 0.6$. The responses $Y_{j,it}$ were simulated from a gamma distribution with $\tau=300$.
-
-```{r}
 rm(list=ls())
 set.seed(12345)
 
@@ -72,7 +40,7 @@ phi1 <- 0.7
 phi2 <- 0.7
 phi3 <- 0.6
 
-# Covariance matrix for the evolution of x_j,t
+# Covariance matrix for the evolution of gamma_j,t
 sigma_w1_sq <- 1/20
 sigma_w2_sq <- 1/25
 sigma_w3_sq <- 1/20
@@ -138,11 +106,6 @@ new_comp2 <- response_jit[response_jit$j.index==2,]$response
 new_comp3 <- response_jit[response_jit$j.index==3,]$response
 
 dat_res <- data.frame(new_comp1,new_comp2,new_comp3)
-```
-
-We setup the indexes and the data frame.
-
-```{r}
 N_1 <- d*T
 
 # Index for random effects (There are N replicated d-variate random effects)
@@ -162,12 +125,10 @@ rep_ind3 <-  rep(1:N, each=N_1)
 response_df_new <- data.frame(all_response,alpha_index
                               ,rep_alpha_index,ind_1,ind_2,ind_3,
                               rep_ind1,rep_ind2,rep_ind3)
-```
-
+####################
 ## R-INLA setup:
-We setup the priors and estimate the model parameters using $\textit{INLA}$
+####################
 
-```{r}
 # Priors:
 prior1 <- list(prec = list(prior="loggamma",param=c(1,0.1)))
 prior2 <- list(prec = list(prior="loggamma",param=c(1,0.1)))
@@ -185,11 +146,9 @@ result= inla(formula.inla,family="gamma",
              control.family = list(hyper = list(prec = list(prior="loggamma"
                                                             ,param=c(300,1)))),
              verbose = TRUE,control.inla=list(control.vb=list(enable=FALSE)))
-```
 
 ## Results:
 
-```{r}
 all_parameters_hyper <- result$summary.hyperpar
 all_parameters_fixed <- result$summary.fixed
 tab <- rbind.data.frame(all_parameters_fixed[,-7],all_parameters_hyper)
@@ -214,4 +173,3 @@ rownames(tab)[c(10,12,14)] <- c("phi11","phi22","phi33")
 
 # Rearranging the rows to make it similar to tale output:
 tab[c(2,1,3:8,10,12,14,9,11,13),c(1,2,3,5,7)]
-```
